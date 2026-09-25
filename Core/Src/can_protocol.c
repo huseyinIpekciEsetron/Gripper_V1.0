@@ -34,6 +34,8 @@ static uint8_t  s_last_key[4] = {0xFFU, 0xFFU, 0xFFU, 0xFFU};
 static uint32_t s_status_timer = 0U;
 static uint32_t s_diag_timer = 0U;
 
+volatile CanProtoDebug_t can_proto_dbg;
+
 static void    Handle_Command(const CanFrame_t *f);
 static bool    Execute_Command(uint8_t cmd);
 static void    Check_CommTimeout(void);
@@ -184,15 +186,20 @@ static void Handle_Command(const CanFrame_t *f)
   uint8_t cmd = f->data[0];
   uint8_t seq = f->data[1];
 
+  can_proto_dbg.cmd_frames++;
+  can_proto_dbg.last_cmd = cmd;
+  can_proto_dbg.last_seq = seq;
   s_comm_timeout_flag = false;
 
   if (!s_seq_synced)
   {
-    /* Acilis / haberlesme donusu: eski komutu calistirma, sadece senkronize ol */
+    /* Acilis / haberlesme donusu: eski komutu calistirma, sadece senkronize ol.
+     * ack BILEREK guncellenmez: master ack_seq != seq gorur ve komut yeniyse
+     * (son 1 s icinde verildiyse) yeni seq ile tekrar gonderir. */
     s_seq_synced   = true;
     s_last_seq     = seq;
-    s_ack_seq      = seq;
     s_force_status = true;
+    can_proto_dbg.resyncs++;
     return;
   }
   if (seq == s_last_seq)
@@ -204,6 +211,11 @@ static void Handle_Command(const CanFrame_t *f)
   s_ack_seq      = seq;
   s_cmd_rejected = !Execute_Command(cmd);
   s_force_status = true;                          /* ack hemen gitsin */
+  can_proto_dbg.executed++;
+  if (s_cmd_rejected)
+  {
+    can_proto_dbg.rejected++;
+  }
 }
 
 static bool Execute_Command(uint8_t cmd)
@@ -241,6 +253,7 @@ static void Check_CommTimeout(void)
       GripperStatus_t gs;
       s_comm_lost  = true;
       s_seq_synced = false;
+      can_proto_dbg.comm_losses++;
       Gripper_GetStatus(&gs);
       if ((gs.state == GRIP_STATE_MOVING) || (gs.state == GRIP_STATE_STARTING))
       {

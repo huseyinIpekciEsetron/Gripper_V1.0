@@ -17,6 +17,20 @@
 #include <stdbool.h>
 #include "tof_sensor.h"
 
+/* Debugger'dan izlemek icin (Live Expressions: can_proto_dbg) */
+typedef struct
+{
+  uint32_t cmd_frames;     /* alinan komut cercevesi (tekrarlar dahil)     */
+  uint32_t executed;       /* calistirilan komut (seq degisti)             */
+  uint32_t rejected;       /* calistirilip reddedilen                      */
+  uint32_t resyncs;        /* acilis / iletisim donusu senkronizasyonu     */
+  uint32_t comm_losses;    /* master'in CAN_COMM_TIMEOUT_MS sustugu an     */
+  uint8_t  last_cmd;
+  uint8_t  last_seq;
+} CanProtoDebug_t;
+
+extern volatile CanProtoDebug_t can_proto_dbg;
+
 void CanProto_Init(bool can_ok);
 void CanProto_ProcessRx(void);
 void CanProto_Tx(void);

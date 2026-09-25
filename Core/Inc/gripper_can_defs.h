@@ -50,8 +50,11 @@
  *  Yeni komut = seq + 1.
  *
  *  Kiskac acildiginda veya haberlesme kopup geri geldiginde ilk gelen
- *  cercevenin seq'ine sadece senkronize olur, komutu CALISTIRMAZ
- *  (reset sonrasi eski bir KAPA komutuyla kendiliginden hareket etmesin).
+ *  cercevenin seq'ine sadece senkronize olur, komutu CALISTIRMAZ ve ack
+ *  VERMEZ (reset sonrasi eski bir KAPA komutuyla kendiliginden hareket
+ *  etmesin). Master ack gelmezse komutu en fazla GLINK_CMD_MAX_RETRY kez,
+ *  sadece komut verildikten sonraki GLINK_CMD_RETRY_WINDOW_MS icinde,
+ *  yeni seq ile tekrar gonderir.
  *
  *  Kiskac 500 ms komut cercevesi alamazsa hareketi durdurur.            */
 #define GCAN_CMD_NOP               0U
