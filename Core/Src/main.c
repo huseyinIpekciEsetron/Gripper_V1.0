@@ -8,6 +8,7 @@
   *   PA0 -> CS (ADC1_IN0) | PA1 -> INA | PA2 -> INB | PA3 -> PWM (TIM2_CH4)
   *   PA4 -> SEL0
   *   PB6 -> I2C1 SCL (TX1 test noktasi) | PB7 -> I2C1 SDA (RX1 test noktasi)
+  *   PA11 -> CAN RX | PA12 -> CAN TX | PA10 -> TCAN337 FAULT
   *
   * Moduller:
   *   app_config.h  : tum ayarlar (esikler, hizlar, sureler)
@@ -15,6 +16,8 @@
   *   gripper.c/h   : kiskac durum makinesi ve korumalar
   *   watchdog.c/h  : IWDG
   *   tof_sensor.c/h: VL53L8CX uygulama katmani (platform.c + ST ULD API)
+  *   can_comm.c/h  : bxCAN dusuk seviye (kuyruklar, filtre, bit zamanlamasi)
+  *   can_protocol.c/h + gripper_can_defs.h : kiskac CAN protokolu (master ile ortak)
   *
   * Debugger (Live Expressions) ile kullanim:
   *   dbg_cmd         : 1 = AC, 2 = KAPA, 3 = DUR  (islenince 0'a doner)
@@ -39,6 +42,9 @@
 #include "watchdog.h"
 #include "platform.h"
 #include "tof_sensor.h"
+#include "can_comm.h"
+#include "can_protocol.h"
+#include "gripper_can_defs.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +65,8 @@
 /* Private variables ---------------------------------------------------------*/
 ADC_HandleTypeDef hadc1;
 DMA_HandleTypeDef hdma_adc1;
+
+CAN_HandleTypeDef hcan;
 
 I2C_HandleTypeDef hi2c1;
 
@@ -85,6 +93,9 @@ volatile bool         dbg_cmd_result = false;
 volatile bool         dbg_clear_fault = false;
 GripperStatus_t       grip_status;
 
+volatile bool         can_ok = false;
+CanStats_t            can_stats;
+
 #if TOF_ENABLE
 volatile bool         dbg_tof_reinit = false;
 ToF_Status_t          tof_status;
@@ -99,6 +110,7 @@ static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
+static void MX_CAN_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -144,6 +156,7 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM2_Init();
   MX_I2C1_Init();
+  MX_CAN_Init();
   /* USER CODE BEGIN 2 */
   /* Once motor: guvenli kapali duruma gelsin */
   if (VNH7100_Init(&vnh_cfg) != HAL_OK)
@@ -159,6 +172,14 @@ int main(void)
   ToF_GetStatus(&tof_status);
 #endif
 
+  /* CAN: sadece master komut ID'si kabul edilir, motor trafigi filtrede elenir.
+   * Hata olursa kart yine calisir (can_ok = false). */
+  {
+    const uint16_t rx_ids[1] = { GCAN_ID_CMD };
+    can_ok = (CanComm_Init(&hcan, rx_ids, 1U) == HAL_OK);
+    CanProto_Init(can_ok);
+  }
+
 #if WATCHDOG_ENABLE
   Watchdog_Init(WATCHDOG_TIMEOUT_MS);
 #endif
@@ -173,7 +194,10 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* Komutlar (debugger / ileride CAN) */
+    /* CAN gonderim kuyrugunu her turda bosalt */
+    CanComm_Task();
+
+    /* Debugger komutlari (CAN'e ek olarak) */
     if (dbg_cmd != GRIP_CMD_NONE)
     {
       dbg_cmd_result = Gripper_Command(dbg_cmd);
@@ -187,7 +211,7 @@ int main(void)
 
 #if TOF_ENABLE
     /* Yeniden kurulum 1-2 s bloklar: sadece motor dururken izin ver */
-    if (dbg_tof_reinit)
+    if (dbg_tof_reinit || CanProto_TakeTofReinitRequest())
     {
       dbg_tof_reinit = false;
       if ((grip_status.state == GRIP_STATE_IDLE) || (grip_status.state == GRIP_STATE_FAULT))
@@ -204,7 +228,9 @@ int main(void)
     {
       last_tick += CTRL_PERIOD_MS;
 
-      /* Once kiskac (guvenlik onceligi), sonra sensor */
+      /* 1) CAN komutlari  2) kiskac (guvenlik onceligi)  3) sensor  4) CAN gonderim */
+      CanProto_ProcessRx();
+
       Gripper_Task();
       Gripper_GetStatus(&grip_status);
 
@@ -213,10 +239,13 @@ int main(void)
       if (ToF_HasNewFrame())
       {
         (void)ToF_GetFrame(&tof_frame);
-        /* Ileride: burada tof_frame CAN ile gonderilecek */
+        CanProto_SendToF(&tof_frame);
       }
       ToF_GetStatus(&tof_status);
 #endif
+
+      CanProto_Tx();
+      CanComm_GetStats(&can_stats);
 
 #if WATCHDOG_ENABLE
       /* Sadece kontrol dongusu calisiyorsa besle */
@@ -224,13 +253,14 @@ int main(void)
 #endif
     }
 
-    /* Ileride: CAN mesaj isleme buraya (bloklamadan) */
   }
   /* USER CODE END 3 */
 }
 
 /**
   * @brief System Clock Configuration
+  *        HSI 8 MHz / 2 x16 = 64 MHz SYSCLK
+  *        APB1 = 32 MHz (TIM2 clock = 64 MHz), APB2 = 64 MHz, ADC = 10.67 MHz
   * @retval None
   */
 void SystemClock_Config(void)
@@ -239,9 +269,6 @@ void SystemClock_Config(void)
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
   RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
-  /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
@@ -253,8 +280,6 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 
-  /** Initializes the CPU, AHB and APB buses clocks
-  */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
@@ -267,7 +292,7 @@ void SystemClock_Config(void)
     Error_Handler();
   }
   PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_ADC;
-  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV8;
+  PeriphClkInit.AdcClockSelection = RCC_ADCPCLK2_DIV6;
   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
@@ -276,6 +301,7 @@ void SystemClock_Config(void)
 
 /**
   * @brief ADC1 Initialization Function
+  *        Tek kanal (IN0), surekli donusum, DMA circular
   * @param None
   * @retval None
   */
@@ -292,8 +318,6 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 1 */
 
-  /** Common config
-  */
   hadc1.Instance = ADC1;
   hadc1.Init.ScanConvMode = ADC_SCAN_DISABLE;
   hadc1.Init.ContinuousConvMode = ENABLE;
@@ -306,8 +330,6 @@ static void MX_ADC1_Init(void)
     Error_Handler();
   }
 
-  /** Configure Regular Channel
-  */
   sConfig.Channel = ADC_CHANNEL_0;
   sConfig.Rank = ADC_REGULAR_RANK_1;
   sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
@@ -330,7 +352,69 @@ static void MX_ADC1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  *        64 MHz / (0+1) / (3199+1) = 20 kHz
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 3199;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
   * @brief I2C1 Initialization Function
+  *        400 kHz fast mode, PB6 = SCL, PB7 = SDA
+  *        (F1'de analog/dijital filtre fonksiyonlari yok, F4 kodundan cikarildi)
   * @param None
   * @retval None
   */
@@ -365,51 +449,42 @@ static void MX_I2C1_Init(void)
 }
 
 /**
-  * @brief TIM2 Initialization Function
+  * @brief CAN Initialization Function
+  *        Degerler 64 MHz (PCLK1 32 MHz) icin 250 kbit/s (master ile ayni).
+  *        CanComm_Init bit zamanlamasini CAN_BITRATE ve PCLK1'e gore yeniden
+  *        ayarlar, HSE 72 MHz'e gecersen de dogru calisir.
   * @param None
   * @retval None
   */
-static void MX_TIM2_Init(void)
+static void MX_CAN_Init(void)
 {
 
-  /* USER CODE BEGIN TIM2_Init 0 */
+  /* USER CODE BEGIN CAN_Init 0 */
 
-  /* USER CODE END TIM2_Init 0 */
+  /* USER CODE END CAN_Init 0 */
 
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_OC_InitTypeDef sConfigOC = {0};
+  /* USER CODE BEGIN CAN_Init 1 */
 
-  /* USER CODE BEGIN TIM2_Init 1 */
-
-  /* USER CODE END TIM2_Init 1 */
-  htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 0;
-  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 3199;
-  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  /* USER CODE END CAN_Init 1 */
+  hcan.Instance = CAN1;
+  hcan.Init.Prescaler = 8;
+  hcan.Init.Mode = CAN_MODE_NORMAL;
+  hcan.Init.SyncJumpWidth = CAN_SJW_2TQ;
+  hcan.Init.TimeSeg1 = CAN_BS1_13TQ;
+  hcan.Init.TimeSeg2 = CAN_BS2_2TQ;
+  hcan.Init.TimeTriggeredMode = DISABLE;
+  hcan.Init.AutoBusOff = ENABLE;
+  hcan.Init.AutoWakeUp = DISABLE;
+  hcan.Init.AutoRetransmission = ENABLE;
+  hcan.Init.ReceiveFifoLocked = DISABLE;
+  hcan.Init.TransmitFifoPriority = ENABLE;
+  if (HAL_CAN_Init(&hcan) != HAL_OK)
   {
     Error_Handler();
   }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
-  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
-  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
-  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM2_Init 2 */
+  /* USER CODE BEGIN CAN_Init 2 */
 
-  /* USER CODE END TIM2_Init 2 */
-  HAL_TIM_MspPostInit(&htim2);
+  /* USER CODE END CAN_Init 2 */
 
 }
 
@@ -454,6 +529,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : CAN_FAULT (PA10), TCAN337 open-drain FAULT cikisi */
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
 }
@@ -487,13 +568,6 @@ void Error_Handler(void)
 }
 
 #ifdef  USE_FULL_ASSERT
-/**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

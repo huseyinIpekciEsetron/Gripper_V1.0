@@ -44,7 +44,7 @@
 #define GRIP_NO_LOAD_MA          20U
 #define GRIP_NO_LOAD_CONFIRM_MS  300U
 
-/* Sert akim limiti (filtresiz) -> FAULT, elle temizlenmeli */
+/* Sert akim limiti (filtresiz): hizli durus, o yon kilitlenir (FAULT DEGIL) */
 #define HARD_OVERCURRENT_MA      650U
 #define HARD_OC_CONFIRM_MS       20U
 
@@ -67,7 +67,7 @@
 
 
 #define TOF_I2C_ADDR             0x52U                    /* 8-bit (0x29 << 1) */
-#define TOF_RESOLUTION           VL53L8CX_RESOLUTION_4X4	  /* veya _4X4 */
+#define TOF_RESOLUTION           VL53L8CX_RESOLUTION_4X4  /* veya _8X8 */
 #define TOF_FREQ_HZ              10U     /* 8x8: max 15 Hz, 4x4: max 60 Hz */
 #define TOF_STALE_MS             500U    /* bu kadar veri gelmezse ERROR */
 #define TOF_MAX_CONSEC_ERRORS    5U      /* ust uste I2C hatasi -> ERROR */
@@ -82,6 +82,20 @@
 #define TOF_I2C_RELEASE_RESET()   __HAL_RCC_I2C1_RELEASE_RESET()
 
 
+
+/* ============================ CAN ======================================== */
+/* Protokol: gripper_can_defs.h (master ile ORTAK dosya).
+ * Robot kol motorlariyla ayni hat -> master ile ayni hiz olmali. */
+#define CAN_BITRATE              250000U
+#define CAN_STATUS_PERIOD_MS     50U     /* durum mesaji (+ her degisimde hemen) */
+#define CAN_DIAG_PERIOD_MS       1000U   /* tani mesaji */
+#define CAN_TOF_SEND_ENABLE      1       /* ToF olcumlerinin hepsini CAN'e yolla */
+#define CAN_COMM_TIMEOUT_MS      500U    /* master susarsa hareketi durdur, 0 = kapali */
+#define FW_VERSION               1U
+
+/* TCAN337 FAULT cikisi (open-drain), PA10, dahili pull-up ile okunur */
+#define CAN_XCVR_FAULT_PORT      GPIOA
+#define CAN_XCVR_FAULT_PIN       GPIO_PIN_10
 
 /* ============================ WATCHDOG =================================== */
 /* Yazilim takilirsa MCU resetlenir, motor durur. Breakpoint'te durur. */
