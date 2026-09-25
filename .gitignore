@@ -1,0 +1,13 @@
+# Derleme (Build) klasörleri ve çıktıları
+Debug/
+Release/
+*.o
+*.elf
+*.hex
+*.bin
+*.map
+*.lst
+
+# IDE ayarları (İsteğe bağlı)
+.metadata/
+.settings/
