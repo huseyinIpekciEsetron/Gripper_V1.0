@@ -96,6 +96,10 @@ GripperStatus_t       grip_status;
 volatile bool         can_ok = false;
 CanStats_t            can_stats;
 
+volatile int8_t  dbg_raw_dir  = 1;    /* 1 ileri, -1 geri, 0 kapali */
+volatile uint8_t dbg_raw_duty = 10;   /* % */
+static bool raw_was_on = false;
+
 #if TOF_ENABLE
 volatile bool         dbg_tof_reinit = false;
 ToF_Status_t          tof_status;
@@ -195,7 +199,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     /* CAN gonderim kuyrugunu her turda bosalt */
-    CanComm_Task();
+   // CanComm_Task();
 
     /* Debugger komutlari (CAN'e ek olarak) */
     if (dbg_cmd != GRIP_CMD_NONE)
@@ -229,9 +233,19 @@ int main(void)
       last_tick += CTRL_PERIOD_MS;
 
       /* 1) CAN komutlari  2) kiskac (guvenlik onceligi)  3) sensor  4) CAN gonderim */
-      CanProto_ProcessRx();
+     // CanProto_ProcessRx();
 
-      Gripper_Task();
+      //Gripper_Task();
+
+      if (dbg_raw_dir != 0) {
+        VNH7100_SetDirection((dbg_raw_dir > 0) ? VNH7100_DIR_FORWARD : VNH7100_DIR_REVERSE);
+        VNH7100_SetDuty(dbg_raw_duty);
+        raw_was_on = true;
+      } else {
+        if (raw_was_on) { VNH7100_Off(); raw_was_on = false; }
+        Gripper_Task();
+      }
+
       Gripper_GetStatus(&grip_status);
 
 #if TOF_ENABLE
