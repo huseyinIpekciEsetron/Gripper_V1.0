@@ -38,7 +38,7 @@
 #define GRIP_STALL_CONFIRM_MS    50U     /* esik bu kadar asilirsa dur */
 
 /* Bu sure icinde zorlanma gorulmezse dur (tam strok suresinin ~1.5 kati) */
-#define GRIP_TRAVEL_TIMEOUT_MS   500U
+#define GRIP_TRAVEL_TIMEOUT_MS   3000U
 
 /* Akim yok: motor bagli degil / kablo kopuk */
 #define GRIP_NO_LOAD_MA          20U
