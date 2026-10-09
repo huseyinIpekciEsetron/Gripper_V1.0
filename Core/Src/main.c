@@ -407,6 +407,8 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE BEGIN I2C1_Init 0 */
   /* F1 errata: takili hat / BUSY bayragi -> init oncesi hat kurtarma */
+  /* TESHIS: once yazilimla ~6 kHz'de sensoru dene (sonuc: i2c_probe) */
+  Platform_I2C_Probe();
   Platform_I2C_BusRecover();
   /* USER CODE END I2C1_Init 0 */
 

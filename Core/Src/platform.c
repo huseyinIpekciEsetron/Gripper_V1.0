@@ -167,6 +167,156 @@ static void BusDelay(void)
   }
 }
 
+/* ============================ BIT-BANG TESTI ============================= */
+/* STM32'nin I2C donanimini KULLANMADAN, pinleri yazilimla surerek ~6 kHz'de
+ * sensorun kimlik kayitlarini okur (ST API'sindeki vl53l8cx_is_alive ile ayni
+ * adimlar). Donanim I2C'si basarisizken bu test basariliysa sorun hiz / kenar /
+ * karisma; bu da basarisizsa sinyal slip ringden yavasta bile saglam gecmiyor. */
+
+volatile PlatformI2CProbe_t i2c_probe;
+
+#define BB_PORT   TOF_I2C_GPIO_PORT
+#define BB_SCL    TOF_I2C_SCL_PIN
+#define BB_SDA    TOF_I2C_SDA_PIN
+
+static void BB_Delay(void)            /* ~80 us @72 MHz -> ~6 kHz */
+{
+  for (volatile uint32_t i = 0U; i < 700U; i++)
+  {
+  }
+}
+
+static void BB_SdaHigh(void) { HAL_GPIO_WritePin(BB_PORT, BB_SDA, GPIO_PIN_SET); }
+static void BB_SdaLow(void)  { HAL_GPIO_WritePin(BB_PORT, BB_SDA, GPIO_PIN_RESET); }
+static void BB_SclLow(void)  { HAL_GPIO_WritePin(BB_PORT, BB_SCL, GPIO_PIN_RESET); }
+static uint8_t BB_SdaRead(void) { return (uint8_t)HAL_GPIO_ReadPin(BB_PORT, BB_SDA); }
+
+/* SCL'yi birakir ve gercekten yukari cikmasini bekler (en fazla ~5 ms) */
+static void BB_SclHigh(void)
+{
+  HAL_GPIO_WritePin(BB_PORT, BB_SCL, GPIO_PIN_SET);
+  for (uint32_t t = 0U; t < 60U; t++)
+  {
+    if (HAL_GPIO_ReadPin(BB_PORT, BB_SCL) == GPIO_PIN_SET)
+    {
+      return;
+    }
+    BB_Delay();
+  }
+  i2c_probe.scl_stuck = 1U;
+}
+
+static void BB_Start(void)
+{
+  BB_SdaHigh(); BB_Delay();
+  BB_SclHigh(); BB_Delay();
+  BB_SdaLow();  BB_Delay();
+  BB_SclLow();  BB_Delay();
+}
+
+static void BB_Stop(void)
+{
+  BB_SdaLow();  BB_Delay();
+  BB_SclHigh(); BB_Delay();
+  BB_SdaHigh(); BB_Delay();
+}
+
+/* 8 bit gonderir, ACK geldiyse 1 doner */
+static uint8_t BB_WriteByte(uint8_t b)
+{
+  for (uint8_t i = 0U; i < 8U; i++)
+  {
+    if ((b & 0x80U) != 0U) { BB_SdaHigh(); } else { BB_SdaLow(); }
+    b = (uint8_t)(b << 1);
+    BB_Delay();
+    BB_SclHigh(); BB_Delay();
+    BB_SclLow();
+  }
+  BB_SdaHigh();                 /* SDA'yi birak, sensor ACK icin asagi ceker */
+  BB_Delay();
+  BB_SclHigh(); BB_Delay();
+  uint8_t ack = (BB_SdaRead() == 0U) ? 1U : 0U;
+  BB_SclLow();  BB_Delay();
+  return ack;
+}
+
+static uint8_t BB_ReadByte(uint8_t send_ack)
+{
+  uint8_t b = 0U;
+  BB_SdaHigh();
+  for (uint8_t i = 0U; i < 8U; i++)
+  {
+    BB_Delay();
+    BB_SclHigh(); BB_Delay();
+    b = (uint8_t)((b << 1) | BB_SdaRead());
+    BB_SclLow();
+  }
+  if (send_ack != 0U) { BB_SdaLow(); } else { BB_SdaHigh(); }
+  BB_Delay();
+  BB_SclHigh(); BB_Delay();
+  BB_SclLow();
+  BB_SdaHigh();
+  BB_Delay();
+  return b;
+}
+
+/* 16-bit adresli tek byte yazma; tum ACK'ler geldiyse 1 */
+static uint8_t BB_WriteReg(uint16_t reg, uint8_t val)
+{
+  uint8_t ok = 1U;
+  BB_Start();
+  ok &= BB_WriteByte((uint8_t)TOF_I2C_ADDR);
+  ok &= BB_WriteByte((uint8_t)(reg >> 8));
+  ok &= BB_WriteByte((uint8_t)(reg & 0xFFU));
+  ok &= BB_WriteByte(val);
+  BB_Stop();
+  return ok;
+}
+
+/* 16-bit adresli tek byte okuma; tum ACK'ler geldiyse 1 */
+static uint8_t BB_ReadReg(uint16_t reg, uint8_t *val)
+{
+  uint8_t ok = 1U;
+  BB_Start();
+  ok &= BB_WriteByte((uint8_t)TOF_I2C_ADDR);
+  ok &= BB_WriteByte((uint8_t)(reg >> 8));
+  ok &= BB_WriteByte((uint8_t)(reg & 0xFFU));
+  BB_Start();                                     /* tekrarlanan START */
+  ok &= BB_WriteByte((uint8_t)(TOF_I2C_ADDR | 0x01U));
+  *val = BB_ReadByte(0U);                         /* tek byte: NACK */
+  BB_Stop();
+  return ok;
+}
+
+void Platform_I2C_Probe(void)
+{
+  GPIO_InitTypeDef g = {0};
+  uint8_t id = 0U, rev = 0U;
+
+  memset((void *)&i2c_probe, 0, sizeof(i2c_probe));
+  TOF_I2C_GPIO_CLK_ENABLE();
+  HAL_GPIO_WritePin(BB_PORT, BB_SCL | BB_SDA, GPIO_PIN_SET);
+  g.Pin   = BB_SCL | BB_SDA;
+  g.Mode  = GPIO_MODE_OUTPUT_OD;
+  g.Pull  = GPIO_NOPULL;
+  g.Speed = GPIO_SPEED_FREQ_LOW;                 /* yumusak kenar */
+  HAL_GPIO_Init(BB_PORT, &g);
+  HAL_Delay(2);
+
+  i2c_probe.scl_idle = (uint8_t)HAL_GPIO_ReadPin(BB_PORT, BB_SCL);
+  i2c_probe.sda_idle = (uint8_t)HAL_GPIO_ReadPin(BB_PORT, BB_SDA);
+
+  i2c_probe.ack_page0 = BB_WriteReg(0x7FFFU, 0x00U);
+  i2c_probe.ack_id    = BB_ReadReg(0x0000U, &id);
+  i2c_probe.ack_rev   = BB_ReadReg(0x0001U, &rev);
+  (void)BB_WriteReg(0x7FFFU, 0x02U);
+
+  i2c_probe.device_id   = id;                    /* beklenen 0xF0 */
+  i2c_probe.revision_id = rev;                   /* beklenen 0x0C */
+  i2c_probe.ok = (uint8_t)((id == 0xF0U) && (rev == 0x0CU));
+  i2c_probe.done = 1U;
+}
+
 void Platform_I2C_BusRecover(void)
 {
   GPIO_InitTypeDef g = {0};

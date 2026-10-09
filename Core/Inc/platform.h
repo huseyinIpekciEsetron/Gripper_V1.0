@@ -243,6 +243,25 @@ typedef struct
 
 extern volatile PlatformI2CStats_t platform_i2c_stats;
 
+/* Bit-bang I2C testi (Live Expressions: i2c_probe). MX_I2C1_Init'ten ONCE cagir. */
+typedef struct
+{
+	uint8_t done;         /* test calisti                                  */
+	uint8_t scl_idle;     /* basta SCL seviyesi (1 = normal)               */
+	uint8_t sda_idle;     /* basta SDA seviyesi (1 = normal)               */
+	uint8_t scl_stuck;    /* SCL birakildiginda yukari cikmadi             */
+	uint8_t ack_page0;    /* sayfa secme yazmasinda tum ACK'ler geldi      */
+	uint8_t ack_id;       /* kimlik okumasinda tum ACK'ler geldi           */
+	uint8_t ack_rev;      /* revizyon okumasinda tum ACK'ler geldi         */
+	uint8_t device_id;    /* beklenen 0xF0 (240)                           */
+	uint8_t revision_id;  /* beklenen 0x0C (12)                            */
+	uint8_t ok;           /* 1: sensor ~6 kHz'de dogru cevap verdi         */
+} PlatformI2CProbe_t;
+
+extern volatile PlatformI2CProbe_t i2c_probe;
+
+void Platform_I2C_Probe(void);
+
 /* Uzun bloklayan islemler (firmware yukleme, bekleme) sirasinda cagrilir.
  * Varsayilan bos; main.c'de watchdog beslemek icin tanimlanir. */
 void VL53L8CX_IdleHook(void);
