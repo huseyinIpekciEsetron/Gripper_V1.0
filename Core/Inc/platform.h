@@ -232,6 +232,13 @@ typedef struct
 	uint32_t failures;         /* 3 tekrarda da basarisiz olan islem     */
 	uint32_t last_error;       /* HAL_I2C_GetError: 1 BERR, 2 ARLO, 4 AF, 8 OVR, 0x20 TIMEOUT */
 	uint8_t  last_hal_status;  /* 1 ERROR, 2 BUSY, 3 TIMEOUT             */
+	/* Teshis: hat kurtarma sirasinda, pinler birakildiktan sonra okunan seviye.
+	 * Bosta ikisi de 1 olmali. Surekli 0 ise hatti bir sey asagi cekiyor. */
+	uint8_t  scl_idle;          /* son okunan SCL seviyesi (1 = normal)   */
+	uint8_t  sda_idle;          /* son okunan SDA seviyesi (1 = normal)   */
+	uint8_t  sda_after_recover; /* 9 darbe + STOP sonrasi SDA (1 = kurtuldu) */
+	uint32_t scl_low_count;     /* SCL'nin bosta 0 bulundugu kurtarma sayisi */
+	uint32_t sda_low_count;     /* SDA'nin bosta 0 bulundugu kurtarma sayisi */
 } PlatformI2CStats_t;
 
 extern volatile PlatformI2CStats_t platform_i2c_stats;

@@ -159,9 +159,10 @@ uint8_t VL53L8CX_WaitMs(VL53L8CX_Platform *p_platform, uint32_t TimeMs)
 
 /* ============================ HAT KURTARMA =============================== */
 
+/* ~10 us @72 MHz: uzun kablo / slip ringde yavas kenarlara zaman tanir */
 static void BusDelay(void)
 {
-  for (volatile uint32_t i = 0U; i < 40U; i++)
+  for (volatile uint32_t i = 0U; i < 150U; i++)
   {
   }
 }
@@ -179,7 +180,18 @@ void Platform_I2C_BusRecover(void)
   g.Pull  = GPIO_NOPULL;
   g.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(TOF_I2C_GPIO_PORT, &g);
-  BusDelay();
+  for (uint32_t i = 0U; i < 10U; i++)        /* ~100 us: hat yukari ciksin */
+  {
+    BusDelay();
+  }
+
+  /* TESHIS: pinler serbest birakildiktan sonra hattin gercek seviyesi.
+   * Bosta ikisi de 1 olmali. 0 ise hatti bir sey asagi cekiyor
+   * (beslemesiz sensor, eksik GND, slip ringde kacak). */
+  platform_i2c_stats.scl_idle = (uint8_t)HAL_GPIO_ReadPin(TOF_I2C_GPIO_PORT, TOF_I2C_SCL_PIN);
+  platform_i2c_stats.sda_idle = (uint8_t)HAL_GPIO_ReadPin(TOF_I2C_GPIO_PORT, TOF_I2C_SDA_PIN);
+  if (platform_i2c_stats.scl_idle == 0U) { platform_i2c_stats.scl_low_count++; }
+  if (platform_i2c_stats.sda_idle == 0U) { platform_i2c_stats.sda_low_count++; }
 
   /* Yarim kalmis bir transfer SDA'yi low tutuyorsa en fazla 9 saat darbesi */
   for (uint32_t i = 0U; (i < 9U) &&
@@ -200,6 +212,8 @@ void Platform_I2C_BusRecover(void)
   BusDelay();
   HAL_GPIO_WritePin(TOF_I2C_GPIO_PORT, TOF_I2C_SDA_PIN, GPIO_PIN_SET);
   BusDelay();
+  platform_i2c_stats.sda_after_recover =
+      (uint8_t)HAL_GPIO_ReadPin(TOF_I2C_GPIO_PORT, TOF_I2C_SDA_PIN);
 
   /* F1 errata: BUSY bayragi takili kalabilir -> cevre birimini resetle.
    * Pinler HAL_I2C_MspInit'te tekrar AF open-drain yapilir. */
