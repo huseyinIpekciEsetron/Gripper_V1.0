@@ -224,6 +224,18 @@ uint8_t VL53L8CX_WaitMs(
  * errata'si icin I2C cevre birimini resetler). HAL_I2C_Init'ten ONCE cagir. */
 void Platform_I2C_BusRecover(void);
 
+/* I2C hata sayaclari (Live Expressions: platform_i2c_stats) */
+typedef struct
+{
+	uint32_t retries;          /* hata sonrasi tekrar denenen islem      */
+	uint32_t recoveries;       /* hat kurtarma sayisi                    */
+	uint32_t failures;         /* 3 tekrarda da basarisiz olan islem     */
+	uint32_t last_error;       /* HAL_I2C_GetError: 1 BERR, 2 ARLO, 4 AF, 8 OVR, 0x20 TIMEOUT */
+	uint8_t  last_hal_status;  /* 1 ERROR, 2 BUSY, 3 TIMEOUT             */
+} PlatformI2CStats_t;
+
+extern volatile PlatformI2CStats_t platform_i2c_stats;
+
 /* Uzun bloklayan islemler (firmware yukleme, bekleme) sirasinda cagrilir.
  * Varsayilan bos; main.c'de watchdog beslemek icin tanimlanir. */
 void VL53L8CX_IdleHook(void);
