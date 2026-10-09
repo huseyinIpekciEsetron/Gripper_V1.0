@@ -33,16 +33,16 @@
 
 /* Zorlanma esikleri (filtreli akim). Kapanmadaki esik = kavrama kuvveti.
  * Ayar: serbest harekette status.peak_mA'ya bak, esigi bunun ustune koy.   */
-#define GRIP_STALL_CLOSE_MA      250U
-#define GRIP_STALL_OPEN_MA       250U
+#define GRIP_STALL_CLOSE_MA      260U
+#define GRIP_STALL_OPEN_MA       220U
 #define GRIP_STALL_CONFIRM_MS    50U     /* esik bu kadar asilirsa dur */
 
 /* Bu sure icinde zorlanma gorulmezse dur (tam strok suresinin ~1.5 kati) */
-#define GRIP_TRAVEL_TIMEOUT_MS   3000U
+#define GRIP_TRAVEL_TIMEOUT_MS   15000U
 
 /* Akim yok: motor bagli degil / kablo kopuk */
 #define GRIP_NO_LOAD_MA          20U
-#define GRIP_NO_LOAD_CONFIRM_MS  300U
+#define GRIP_NO_LOAD_CONFIRM_MS  250U
 
 /* Sert akim limiti (filtresiz): hizli durus, o yon kilitlenir (FAULT DEGIL) */
 #define HARD_OVERCURRENT_MA      650U
@@ -64,6 +64,7 @@
 /* 0 yaparsan sensor kodu ve 86 KB firmware derlemeden cikar
  * (motor kodu STM32F103C8'in 64 KB flash'ina yine sigar). */
 #define TOF_ENABLE               1
+
 
 
 #define TOF_I2C_ADDR             0x52U                    /* 8-bit (0x29 << 1) */
