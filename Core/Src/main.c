@@ -564,8 +564,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   __disable_irq();
   /* Guvenli durum: motoru dogrudan register ile kapat */
-  TIM2->CCR4 = 0U;
-  GPIOA->BSRR = (uint32_t)(INA_Pin | INB_Pin | sel_Pin) << 16;
+  MOTOR_EMERGENCY_OFF();
   /* Watchdog aciksa bir sure sonra MCU resetlenir ve yeniden baslar */
   while (1)
   {

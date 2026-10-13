@@ -69,7 +69,12 @@ void Error_Handler(void);
 #define sel_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
-
+/* Motoru HAL'e ve yazilim durumuna guvenmeden, dogrudan register ile kapatir:
+ * PWM (TIM2 CH4) = 0, INA = INB = SEL0 = 0. Ariza yakalayicilari ve
+ * Error_Handler icin; RAM bozulmus olsa bile calisir. */
+#define MOTOR_EMERGENCY_OFF()  do { TIM2->CCR4 = 0U; \
+                                    GPIOA->BSRR = (uint32_t)(INA_Pin | INB_Pin | sel_Pin) << 16; \
+                                  } while (0)
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
