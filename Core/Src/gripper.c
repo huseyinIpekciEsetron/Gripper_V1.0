@@ -6,6 +6,12 @@
   *   IDLE --komut--> STARTING --1 periyot--> MOVING --dur--> STOPPING --> IDLE
   *                                            |
   *                                            +--surucu arizasi--> FAULT --500 ms / ClearFault--> STOPPING
+  *
+  *  Calisma baglami: durum makinesi (Gripper_Task) SysTick kesmesinde, her
+  *  CTRL_PERIOD_MS'de bir calisir (Gripper_SysTick). Boylece ana dongu I2C'de
+  *  (ToF sensoru) beklerken de akim korumalari zamaninda calisir.
+  *  Gripper_Command / ClearFault / GetStatus ana donguden cagrilir ve kesmeyle
+  *  cakismamak icin kisa bir kritik bolgede calisir.
   ******************************************************************************
   */
 #include "gripper.h"
@@ -25,7 +31,11 @@ static uint32_t        s_oc_ms;
 static uint32_t        s_sat_ms;
 static uint32_t        s_filt_acc;     /* filtre akumulatoru (akim << SHIFT) */
 static uint32_t        s_consec_faults;/* ust uste ariza sayisi */
+static volatile bool   s_ready = false;/* Gripper_Init bitti: kesme kontrolu calisabilir */
+static uint8_t         s_tick_ms;      /* SysTick sayaci (CTRL_PERIOD_MS'e kadar) */
 
+static bool Command_Locked(GripperCmd_t cmd);
+static void Gripper_Task(void);
 static void StopMotion(GripperStopReason_t reason);
 static void BeginStart(void);
 static void Moving_Task(bool saturated);
@@ -52,9 +62,35 @@ void Gripper_Init(void)
   s_filt_acc = 0U;
 
   VNH7100_Off();
+  s_ready = true;
+}
+
+/* SysTick kesmesinden (1 ms) cagrilir: her CTRL_PERIOD_MS'de bir kontrol adimi */
+void Gripper_SysTick(void)
+{
+  if (!s_ready)
+  {
+    return;
+  }
+  if (++s_tick_ms < CTRL_PERIOD_MS)
+  {
+    return;
+  }
+  s_tick_ms = 0U;
+  Gripper_Task();
 }
 
 bool Gripper_Command(GripperCmd_t cmd)
+{
+  uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  bool ok = Command_Locked(cmd);
+  __set_PRIMASK(primask);
+  return ok;
+}
+
+/* Kesmeler kapaliyken cagrilir (kontrol kesmesi durumu degistirmesin) */
+static bool Command_Locked(GripperCmd_t cmd)
 {
   bool moving = (s.state == GRIP_STATE_MOVING) || (s.state == GRIP_STATE_STARTING);
 
@@ -98,31 +134,40 @@ bool Gripper_Command(GripperCmd_t cmd)
   }
 }
 
+/* Latch'i burada degil, kontrol kesmesi acar (VNH7100_ResetLatch ~3 ms surer,
+ * kesmeler kapaliyken yapilmamali): kurtarma sayaci dolu yazilir, FAULT
+ * durumundaki otomatik kurtarma bir sonraki periyotta (<= 10 ms) calisir. */
 bool Gripper_ClearFault(void)
 {
-  if (s.state != GRIP_STATE_FAULT)
+  bool ok = false;
+  uint32_t primask = __get_PRIMASK();
+  __disable_irq();
+  if (s.state == GRIP_STATE_FAULT)
   {
-    return false;
+    s_consec_faults = 0U;
+    s.fault_latched = false;
+    s_pending   = GRIP_MOTION_NONE;
+    s_timer_ms  = GRIP_FAULT_RECOVERY_MS;
+    /* s.blocked korunur: arizaya giren yone tekrar zorlama yapilmasin */
+    ok = true;
   }
-  VNH7100_ResetLatch();
-  s_consec_faults = 0U;
-  s.fault_latched = false;
-  s_pending   = GRIP_MOTION_NONE;
-  s_timer_ms  = 0U;
-  s.state     = GRIP_STATE_STOPPING;
-  /* s.blocked korunur: arizaya giren yone tekrar zorlama yapilmasin */
-  return true;
+  __set_PRIMASK(primask);
+  return ok;
 }
 
 void Gripper_GetStatus(GripperStatus_t *out)
 {
   if (out != NULL)
   {
-    *out = s;
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    *out = s;                            /* tutarli kopya: kesme yarida degistirmesin */
+    __set_PRIMASK(primask);
   }
 }
 
-void Gripper_Task(void)
+/* SysTick kesmesinde, her CTRL_PERIOD_MS'de bir (Gripper_SysTick) */
+static void Gripper_Task(void)
 {
   /* 1) Olcum (her durumda) */
   uint16_t raw = VNH7100_ReadRaw();

@@ -22,7 +22,11 @@ Bu dosya Claude Code için proje bağlamıdır. Kullanıcıyla Türkçe konuş.
 | `can_protocol.c/h` | Komut (seq tabanlı, tek sefer çalıştırma), durum / tanı / mesafe mesajları |
 | `vl53l8cx_api.*`, `vl53l8cx_buffers.h` | ST'nin kütüphanesi, DEĞİŞTİRME |
 
-Ana döngü `main.c`'de: her turda `CanComm_Task()`; her 10 ms'de `CanProto_ProcessRx → Gripper_Task → ToF_Task → CanProto_SendToF → CanProto_Tx`.
+Ana döngü `main.c`'de: her turda `CanComm_Task()`; her 10 ms'de `CanProto_ProcessRx → ToF_Task → CanProto_SendToF → CanProto_Tx`.
+Kıskaç kontrolü (`Gripper_Task`: durum makinesi + akım korumaları) ana döngüde değil, SysTick kesmesinde
+her 10 ms'de çalışır (`Gripper_SysTick`, `stm32f1xx_it.c`). Böylece ana döngü I2C'de (ToF) beklerken de
+korumalar zamanında çalışır. Kesme içinde `HAL_Delay` kullanılamaz (`VNH7100_ResetLatch` DWT ile bekler).
+`Gripper_Command` / `ClearFault` / `GetStatus` kendi kritik bölgelerinde çalışır.
 
 ## Kurallar ve bilinen tuzaklar
 

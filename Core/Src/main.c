@@ -229,10 +229,10 @@ int main(void)
     {
       last_tick += CTRL_PERIOD_MS;
 
-      /* 1) CAN komutlari  2) kiskac (guvenlik onceligi)  3) sensor  4) CAN gonderim */
+      /* 1) CAN komutlari  2) sensor  3) CAN gonderim.
+       * Kiskac kontrolu (Gripper_Task) burada degil, SysTick kesmesinde calisir:
+       * ToF I2C islemi uzun surse de akim korumalari gecikmez. */
       CanProto_ProcessRx();
-
-      Gripper_Task();
 
       Gripper_GetStatus(&grip_status);
 

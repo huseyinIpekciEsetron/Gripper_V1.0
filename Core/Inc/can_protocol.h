@@ -4,11 +4,12 @@
   * @brief   Kiskac CAN protokolu - kiskac karti tarafi
   *          Mesaj formatlari: gripper_can_defs.h (master ile ortak)
   *
-  *  10 ms kontrol dongusunde cagri sirasi:
-  *    CanProto_ProcessRx()   -> komutlari isle   (Gripper_Task'tan ONCE)
-  *    Gripper_Task(), ToF_Task()
+  *  Ana dongunun 10 ms adiminda cagri sirasi (kiskac kontrolu ayrica
+  *  SysTick kesmesinde calisir, bkz. gripper.c):
+  *    CanProto_ProcessRx()   -> komutlari isle
+  *    ToF_Task()
   *    CanProto_SendToF()     -> yeni ToF olcumu varsa
-  *    CanProto_Tx()          -> durum / tani     (Gripper_Task'tan SONRA)
+  *    CanProto_Tx()          -> durum / tani
   ******************************************************************************
   */
 #ifndef CAN_PROTOCOL_H

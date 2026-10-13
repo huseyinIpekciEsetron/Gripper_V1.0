@@ -13,8 +13,10 @@
   *   - FAULT sirasinda ters yon komutu kabul edilir, kurtarma sonrasi calisir
   *   - Yumusak kalkis, her durustan sonra bekleme, yon degisiminde once durma
   *
-  *  NOT: Gripper_Command / Gripper_ClearFault ana donguden cagrilmali.
-  *       Ileride CAN kesmesinden gelecek komutlar bir bayrakla donguye aktarilmali.
+  *  NOT: Kontrol (durum makinesi + korumalar) SysTick kesmesinde calisir
+  *       (Gripper_SysTick). Gripper_Command / ClearFault / GetStatus ana
+  *       donguden cagrilir; kendi kritik bolgeleri var. Baska bir kesmeden
+  *       cagrilmamali.
   ******************************************************************************
   */
 #ifndef GRIPPER_H
@@ -76,7 +78,7 @@ typedef struct
 void Gripper_Init(void);
 bool Gripper_Command(GripperCmd_t cmd);   /* false: reddedildi (kalici FAULT / kilitli yon) */
 bool Gripper_ClearFault(void);            /* false: FAULT'ta degil */
-void Gripper_Task(void);                  /* her CTRL_PERIOD_MS'de bir cagir */
+void Gripper_SysTick(void);               /* SysTick_Handler'dan, her 1 ms */
 void Gripper_GetStatus(GripperStatus_t *out);
 
 #endif /* GRIPPER_H */

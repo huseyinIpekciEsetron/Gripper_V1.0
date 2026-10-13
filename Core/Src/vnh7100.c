@@ -15,6 +15,18 @@ static VNH7100_Config_t  s_cfg;
 static volatile uint16_t s_adc_buf[ADC_BUF_SIZE];
 static uint8_t           s_duty = 0U;
 
+/* Mesgul bekleme. Kiskac kontrolu SysTick kesmesinde calistigi icin HAL_Delay
+ * kullanilamaz (kesme icindeyken tick ilerlemez, sonsuza kadar bekler).
+ * DWT cevrim sayaci VNH7100_Init'te acilir. */
+static void DelayUs(uint32_t us)
+{
+  uint32_t start  = DWT->CYCCNT;
+  uint32_t cycles = us * (SystemCoreClock / 1000000U);
+  while ((DWT->CYCCNT - start) < cycles)
+  {
+  }
+}
+
 HAL_StatusTypeDef VNH7100_Init(const VNH7100_Config_t *cfg)
 {
   if ((cfg == NULL) || (cfg->hadc == NULL) || (cfg->htim == NULL) ||
@@ -23,6 +35,10 @@ HAL_StatusTypeDef VNH7100_Init(const VNH7100_Config_t *cfg)
     return HAL_ERROR;
   }
   s_cfg = *cfg;
+
+  /* DelayUs icin cevrim sayaci (debugger bagli olmasa da calissin) */
+  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  DWT->CTRL        |= DWT_CTRL_CYCCNTENA_Msk;
 
   /* Guvenli baslangic: her sey kapali */
   VNH7100_Off();
@@ -93,11 +109,11 @@ void VNH7100_ResetLatch(void)
 
   VNH7100_SetDuty(0U);
   s_cfg.port->BSRR = in_mask << 16;
-  HAL_Delay(1);
+  DelayUs(1000U);
   s_cfg.port->BSRR = in_mask;
-  HAL_Delay(1);
+  DelayUs(1000U);
   s_cfg.port->BSRR = in_mask << 16;
-  HAL_Delay(1);
+  DelayUs(1000U);
   VNH7100_Off();
 }
 
