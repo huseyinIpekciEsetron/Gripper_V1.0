@@ -33,8 +33,8 @@
 
 /* Zorlanma esikleri (filtreli akim). Kapanmadaki esik = kavrama kuvveti.
  * Ayar: serbest harekette status.peak_mA'ya bak, esigi bunun ustune koy.   */
-#define GRIP_STALL_CLOSE_MA      260U
-#define GRIP_STALL_OPEN_MA       220U
+#define GRIP_STALL_CLOSE_MA      220U
+#define GRIP_STALL_OPEN_MA       230U
 #define GRIP_STALL_CONFIRM_MS    50U     /* esik bu kadar asilirsa dur */
 
 /* Bu sure icinde zorlanma gorulmezse dur (tam strok suresinin ~1.5 kati) */
